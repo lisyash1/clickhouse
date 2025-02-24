@@ -1,0 +1,108 @@
+version: '3'
+
+services:
+  zookeeper:
+    image: 'bitnami/zookeeper:3.7.2'
+    hostname: zoo1
+    container_name: zoo1    
+    networks:
+      - ch_replicated
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+      - ZOOKEEPER_CLIENT_PORT=2181
+    ports:
+      - "2182:2181"
+      - "2888:2888"
+      - "3888:3888"
+
+  kafka:  
+    image: 'confluentinc/cp-kafka:7.7.0'  
+    hostname: kafka
+    container_name: kafka
+    ports:  
+      - "9092:9092"
+      - "19092:19092"
+    environment:  
+      KAFKA_BROKER_ID: 1  
+      KAFKA_ZOOKEEPER_CONNECT: zoo1:2181  
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092  
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:19092  
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT  
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT  
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1  
+    networks:
+      - ch_replicated        
+    depends_on:
+      - zookeeper      
+    
+  clickhouse1:
+    image: clickhouse/clickhouse-server:24.8.4.13
+    container_name: click1
+    hostname: clickhouse1     
+    ports:
+      - "9101:9000"
+      - "8223:8123"
+    volumes:
+      - ./click/replica01/config.d:/etc/clickhouse-server/config.d
+      - ./click/tables:/tmp/scripts
+    networks:
+      - ch_replicated
+    depends_on:
+      - zookeeper
+    restart: on-failure
+      
+  clickhouse2:
+    image: clickhouse/clickhouse-server:24.8.4.13
+    container_name: click2
+    hostname: clickhouse2   
+    ports:
+      - "9102:9000"
+      - "8323:8123"
+    volumes:
+      - ./click/replica02/config.d:/etc/clickhouse-server/config.d
+    networks:
+      - ch_replicated
+    depends_on:
+      - zookeeper
+    restart: on-failure
+
+  superset:
+    image: apache/superset:3.1.1
+    container_name: superset
+    environment:
+      - SUPERSET_SECRET_KEY=MyVerySecretKey
+    ports:
+      - '8088:8088'     
+    networks:
+      - ch_replicated
+
+  airflow:
+    container_name: airflow
+    build: .
+    restart: always
+    depends_on:
+      - postgres
+    ports:
+      - 8001:8080
+    volumes:
+    - ./airflow/scripts:/project/scripts
+    - ./airflow/dags:/usr/local/airflow/dags
+    networks:
+      - ch_replicated
+
+  postgres:
+    image: postgres:13
+    container_name: postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    restart: always
+    ports:
+      - "5432:5432"
+    networks:
+      - ch_replicated      
+
+networks:
+  ch_replicated:
+    driver: bridge
